@@ -50,6 +50,7 @@ func main() {
 		AppRunning: func() bool { return exec.Command("pgrep", "-x", "WhatsApp").Run() == nil },
 		WacliPath:  filepath.Join(home, ".local", "share", "wa", "bin", "wacli"),
 		Downloads:  filepath.Join(home, "Downloads", "whatsapp"),
+		Sleep:      time.Sleep,
 	}))
 }
 

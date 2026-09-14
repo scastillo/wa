@@ -21,6 +21,11 @@ type harness struct {
 	tty       bool
 	stdin     string
 	downloads string
+	appDown   bool
+
+	clock   time.Time       // advanced only by Sleep
+	sleeps  int             // how many times a command slept
+	onSleep func(sleep int) // runs after each sleep, e.g. to write a new row
 }
 
 // newHarness builds three chats. Only "Family" is on the allowlist.
@@ -38,7 +43,7 @@ func newHarness(t *testing.T) *harness {
 		(10, 1, ?, 0, '111@g.us', 1, 'CMPPodUGIAA=', 'family hello', 0),
 		(11, 2, ?, 0, '222@g.us', NULL, 'Dr', 'SECRET-DOCTOR hello', 0),
 		(12, 3, ?, 0, '5731@s.whatsapp.net', NULL, 'Ana', 'SECRET-ANA hello', 0)`, at(-time.Minute), at(-2*time.Minute), at(-3*time.Minute))
-	h := &harness{fx: fx, policy: filepath.Join(t.TempDir(), "policy.json")}
+	h := &harness{fx: fx, policy: filepath.Join(t.TempDir(), "policy.json"), clock: now}
 	p, _ := policy.Load(h.policy)
 	p.Add("111@g.us", "2026-09-14")
 	if err := p.Save(h.policy); err != nil {
@@ -57,12 +62,19 @@ func (h *harness) run(t *testing.T, args ...string) (code int, stdout, stderr st
 		Stderr:       &errOut,
 		Stdin:        strings.NewReader(h.stdin),
 		IsTTY:        func() bool { return h.tty },
-		Now:          func() time.Time { return now },
+		Now:          func() time.Time { return h.clock },
 		Location:     time.UTC,
 		AppInstalled: func() bool { return true },
-		AppRunning:   func() bool { return true },
-		WacliPath:    filepath.Join(h.fx.Dir, "no-wacli"),
-		Downloads:    h.downloads,
+		AppRunning:   func() bool { return !h.appDown },
+		Sleep: func(d time.Duration) {
+			h.sleeps++
+			h.clock = h.clock.Add(d)
+			if h.onSleep != nil {
+				h.onSleep(h.sleeps)
+			}
+		},
+		WacliPath: filepath.Join(h.fx.Dir, "no-wacli"),
+		Downloads: h.downloads,
 	})
 	return code, out.String(), errOut.String()
 }

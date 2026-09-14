@@ -48,6 +48,8 @@ commands:
   media    <chat> [--since D] [--until D|--before D] [--limit N] [--type image,video,audio,document,sticker]
            [--from S] [--dest DIR] [--dry-run] [--remote none|live|all] [--json]
            saves attachments; a chat not on the allowlist gets counts and name-free file names only
+  watch    --state F [--seed] [--chat C]... [--wait S] [--poll S] [--full] [--json]
+           one-shot: prints new messages and exits, or prints (no new messages) when --wait ends
 
 <chat> is a JID, a chat number from "wa chats", or part of a chat name.
 D is YYYY-MM-DD, RFC 3339, or an age such as 36h or 7d.
@@ -67,6 +69,7 @@ type Env struct {
 	AppRunning   func() bool
 	WacliPath    string
 	Downloads    string // default destination of wa media
+	Sleep        func(time.Duration)
 }
 
 // Run executes one wa command and returns its exit code.
@@ -90,6 +93,8 @@ func Run(args []string, env Env) int {
 		return search(args[1:], env)
 	case "media":
 		return mediaCmd(args[1:], env)
+	case "watch":
+		return watchCmd(args[1:], env)
 	case "help", "-h", "--help":
 		fmt.Fprintln(env.Stdout, usage)
 		return exitOK
