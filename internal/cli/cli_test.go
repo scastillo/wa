@@ -16,10 +16,11 @@ import (
 var now = time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 
 type harness struct {
-	fx     *fixture.Set
-	policy string
-	tty    bool
-	stdin  string
+	fx        *fixture.Set
+	policy    string
+	tty       bool
+	stdin     string
+	downloads string
 }
 
 // newHarness builds three chats. Only "Family" is on the allowlist.
@@ -61,6 +62,7 @@ func (h *harness) run(t *testing.T, args ...string) (code int, stdout, stderr st
 		AppInstalled: func() bool { return true },
 		AppRunning:   func() bool { return true },
 		WacliPath:    filepath.Join(h.fx.Dir, "no-wacli"),
+		Downloads:    h.downloads,
 	})
 	return code, out.String(), errOut.String()
 }

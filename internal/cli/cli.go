@@ -45,6 +45,9 @@ commands:
   disallow <chat>          remove a chat from the allowlist
   read     <chat> [--since D] [--until D] [--limit N] [--full] [--json]
   search   <text> [--chat C] [--since D] [--until D] [--limit N] [--full] [--json]
+  media    <chat> [--since D] [--until D|--before D] [--limit N] [--type image,video,audio,document,sticker]
+           [--from S] [--dest DIR] [--dry-run] [--remote none|live|all] [--json]
+           saves attachments; a chat not on the allowlist gets counts and name-free file names only
 
 <chat> is a JID, a chat number from "wa chats", or part of a chat name.
 D is YYYY-MM-DD, RFC 3339, or an age such as 36h or 7d.
@@ -63,6 +66,7 @@ type Env struct {
 	AppInstalled func() bool
 	AppRunning   func() bool
 	WacliPath    string
+	Downloads    string // default destination of wa media
 }
 
 // Run executes one wa command and returns its exit code.
@@ -84,6 +88,8 @@ func Run(args []string, env Env) int {
 		return read(args[1:], env)
 	case "search":
 		return search(args[1:], env)
+	case "media":
+		return mediaCmd(args[1:], env)
 	case "help", "-h", "--help":
 		fmt.Fprintln(env.Stdout, usage)
 		return exitOK
@@ -156,6 +162,11 @@ func pick(env Env, all []store.Chat, p *policy.Policy, query string) (store.Chat
 	case len(allowed) == 0:
 		return store.Chat{}, fail(env, exitNotAllowed, "that chat is not on the allowlist; %s", allowHint)
 	}
+	return store.Chat{}, listCandidates(env, allowed, hidden)
+}
+
+// listCandidates names allowed candidates and counts the rest. It returns exitAmbiguous.
+func listCandidates(env Env, allowed []store.Chat, hidden int) int {
 	fmt.Fprintln(env.Stderr, "wa: more than one chat matches; use a JID or a chat number:")
 	for _, c := range allowed {
 		fmt.Fprintf(env.Stderr, "  %s\n", chatLine(c, env))
@@ -163,7 +174,7 @@ func pick(env Env, all []store.Chat, p *policy.Policy, query string) (store.Chat
 	if hidden > 0 {
 		fmt.Fprintf(env.Stderr, "  (%d more not on the allowlist)\n", hidden)
 	}
-	return store.Chat{}, exitAmbiguous
+	return exitAmbiguous
 }
 
 func chatLine(c store.Chat, env Env) string {
