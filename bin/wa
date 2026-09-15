@@ -1,0 +1,63 @@
+#!/bin/sh
+# wa launcher for the Claude Code plugin. Claude Code puts this bin/ folder on
+# PATH. The launcher runs the first binary it finds:
+#   1. $WA_BIN, when set.
+#   2. dist/wa in the plugin folder: a local build in a developer checkout.
+#   3. The release binary for the plugin version, cached in ~/.local/share/wa/bin.
+#      The first run downloads it with gh and checks it against the release
+#      SHA256SUMS. A link named wa next to it lets the user run wa in their own
+#      terminal, for example for `wa allow`.
+set -eu
+
+repo=scastillo/wa
+
+die() {
+	printf 'wa: %s\n' "$*" >&2
+	exit 1
+}
+
+if [ -n "${WA_BIN:-}" ]; then
+	exec "$WA_BIN" "$@"
+fi
+
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
+if [ -x "$root/dist/wa" ]; then
+	exec "$root/dist/wa" "$@"
+fi
+
+[ "$(uname -s)" = Darwin ] || die "wa reads WhatsApp Desktop data on macOS only"
+case $(uname -m) in
+arm64) arch=arm64 ;;
+x86_64) arch=amd64 ;;
+*) die "there is no wa release for this CPU: $(uname -m)" ;;
+esac
+
+version=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" | head -n 1)
+[ -n "$version" ] || die "cannot read the plugin version from $root/.claude-plugin/plugin.json"
+
+asset=wa-darwin-$arch
+cache=$HOME/.local/share/wa/bin
+bin=$cache/wa-$version-darwin-$arch
+
+if [ ! -x "$bin" ]; then
+	command -v gh >/dev/null 2>&1 ||
+		die "the first run downloads wa $version with the GitHub CLI. Install gh, run 'gh auth login', then retry"
+	mkdir -p "$cache"
+	part=$bin.part.$$
+	if ! gh release download "v$version" -R "$repo" -p "$asset" -O "$part"; then
+		rm -f "$part"
+		die "cannot download wa $version from $repo. Check 'gh auth status' and your read access to the repo"
+	fi
+	sums=$(gh release download "v$version" -R "$repo" -p SHA256SUMS -O -) || sums=''
+	want=$(printf '%s\n' "$sums" | awk -v f="$asset" '$2 == f { print $1; exit }')
+	got=$(shasum -a 256 "$part" | awk '{ print $1 }')
+	if [ -z "$want" ] || [ "$want" != "$got" ]; then
+		rm -f "$part"
+		die "the downloaded $asset does not match the release checksum. Nothing was installed"
+	fi
+	chmod 755 "$part"
+	mv -f "$part" "$bin"
+fi
+
+ln -sfn "wa-$version-darwin-$arch" "$cache/wa"
+exec "$bin" "$@"

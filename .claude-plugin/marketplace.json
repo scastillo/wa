@@ -1,0 +1,17 @@
+{
+  "name": "wa",
+  "owner": {
+    "name": "scastillo"
+  },
+  "metadata": {
+    "description": "Private marketplace for the wa WhatsApp reader plugin."
+  },
+  "plugins": [
+    {
+      "name": "wa",
+      "description": "Read, search and watch WhatsApp Desktop chats on a Mac, read-only, and save their attachments. Only chats on the user's allowlist are readable.",
+      "version": "0.1.0",
+      "source": "./"
+    }
+  ]
+}
