@@ -10,7 +10,7 @@ A Claude Code plugin that reads WhatsApp Desktop data on a Mac.
 
 - A Mac (Apple silicon or Intel) with WhatsApp Desktop, linked to your phone.
 - Claude Code.
-- The GitHub CLI, logged in with read access to this private repo: `gh auth login`.
+- No GitHub account. The repo and its releases are public.
 
 ## Install.
 
@@ -20,6 +20,7 @@ A Claude Code plugin that reads WhatsApp Desktop data on a Mac.
 4. Ask Claude to check WhatsApp health, or run `/wa:whatsapp doctor`.
    - The first `wa` call downloads the binary for the plugin version.
    - It checks the binary against the release `SHA256SUMS` before it runs it.
+   - macOS can ask for access to other apps' data. Allow it, or `wa` cannot read the chats.
 
 ## Allow a chat.
 
@@ -70,6 +71,13 @@ Exit codes: 0 ok, 1 error, 2 more than one chat matches, 3 the chat is not on th
 - `wa` cannot get files that only the phone still has.
 - A WhatsApp Desktop update can change the data. `wa doctor` then names the missing columns.
 - `wa watch` does not report edited or deleted messages.
+
+## Uninstall.
+
+1. In Claude Code: `/plugin uninstall wa@wa`, then `/plugin marketplace remove wa`.
+2. Delete the binaries in `~/.local/share/wa/`.
+3. Delete the allowlist `~/.config/wa/policy.json`.
+4. Files that `wa media` saved stay in `~/Downloads/whatsapp`. Delete them yourself.
 
 ## Develop.
 

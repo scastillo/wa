@@ -3,6 +3,15 @@
 This file lists all notable changes to the wa plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.1] - 2026-09-16
+
+### Changed
+
+- The launcher downloads the release with curl, from the now public repo. Users need no GitHub account and no `gh`.
+- Hints name the command the user can run in their own terminal, `~/.local/share/wa/bin/wa allow --match <name>`. Plain `wa` exists only inside the agent session.
+- `wa doctor` no longer warns about a missing `wacli`. Reading never needs it.
+- The README says that macOS can ask for access to other apps' data, and how to uninstall.
+
 ## [0.1.0] - 2026-09-14
 
 ### Added

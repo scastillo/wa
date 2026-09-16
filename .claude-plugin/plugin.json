@@ -1,6 +1,6 @@
 {
   "name": "wa",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read, search and watch WhatsApp Desktop chats on a Mac, read-only, and save their attachments. Only chats on the user's allowlist are readable.",
   "author": {
     "name": "scastillo"

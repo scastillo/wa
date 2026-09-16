@@ -49,9 +49,20 @@ func main() {
 		},
 		AppRunning: func() bool { return exec.Command("pgrep", "-x", "WhatsApp").Run() == nil },
 		WacliPath:  filepath.Join(home, ".local", "share", "wa", "bin", "wacli"),
+		AllowCmd:   allowCmd(home),
 		Downloads:  filepath.Join(home, "Downloads", "whatsapp"),
 		Sleep:      time.Sleep,
 	}))
+}
+
+// allowCmd is what the user types in their own terminal to run wa. The plugin
+// launcher keeps a link there; plain "wa" works only inside the agent session.
+func allowCmd(home string) string {
+	link := filepath.Join(home, ".local", "share", "wa", "bin", "wa")
+	if _, err := os.Stat(link); err == nil {
+		return link
+	}
+	return "wa"
 }
 
 func isTerminal(f *os.File) bool {

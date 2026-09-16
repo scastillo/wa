@@ -22,6 +22,8 @@ type harness struct {
 	stdin     string
 	downloads string
 	appDown   bool
+	allowCmd  string // what doctor and the hints tell the user to run
+	wacli     string // where wa looks for wacli
 
 	clock   time.Time       // advanced only by Sleep
 	sleeps  int             // how many times a command slept
@@ -43,7 +45,8 @@ func newHarness(t *testing.T) *harness {
 		(10, 1, ?, 0, '111@g.us', 1, 'CMPPodUGIAA=', 'family hello', 0),
 		(11, 2, ?, 0, '222@g.us', NULL, 'Dr', 'SECRET-DOCTOR hello', 0),
 		(12, 3, ?, 0, '5731@s.whatsapp.net', NULL, 'Ana', 'SECRET-ANA hello', 0)`, at(-time.Minute), at(-2*time.Minute), at(-3*time.Minute))
-	h := &harness{fx: fx, policy: filepath.Join(t.TempDir(), "policy.json"), clock: now}
+	h := &harness{fx: fx, policy: filepath.Join(t.TempDir(), "policy.json"), clock: now,
+		wacli: filepath.Join(fx.Dir, "no-wacli")}
 	p, _ := policy.Load(h.policy)
 	p.Add("111@g.us", "2026-09-14")
 	if err := p.Save(h.policy); err != nil {
@@ -73,7 +76,8 @@ func (h *harness) run(t *testing.T, args ...string) (code int, stdout, stderr st
 				h.onSleep(h.sleeps)
 			}
 		},
-		WacliPath: filepath.Join(h.fx.Dir, "no-wacli"),
+		WacliPath: h.wacli,
+		AllowCmd:  h.allowCmd,
 		Downloads: h.downloads,
 	})
 	return code, out.String(), errOut.String()
@@ -258,6 +262,41 @@ func TestDoctor(t *testing.T) {
 	code, out, errOut = h.run(t, "doctor")
 	if code != 1 || !strings.Contains(out+errOut, "schema drift") || !strings.Contains(out+errOut, "ZWAMESSAGE.ZTEXT") {
 		t.Fatalf("drift: exit %d\n%s%s", code, out, errOut)
+	}
+}
+
+func TestHintsNameTheCommandTheUserCanRunAndDoctorSkipsWacli(t *testing.T) {
+	h := newHarness(t)
+	h.allowCmd = "/opt/wa/bin/wa"
+	h.policy = filepath.Join(t.TempDir(), "none.json") // no chat is allowed
+	hint := "/opt/wa/bin/wa allow --match <name>"
+
+	code, out, errOut := h.run(t, "doctor")
+	if code != 0 || !strings.Contains(out, hint) {
+		t.Fatalf("doctor must name the command: exit %d\n%s%s", code, out, errOut)
+	}
+	if strings.Contains(out+errOut, "wacli") {
+		t.Fatalf("a missing wacli is not worth a line; reading never needs it:\n%s", out)
+	}
+	if code, _, errOut = h.run(t, "read", "111@g.us"); code != exitNotAllowed || !strings.Contains(errOut, hint) {
+		t.Fatalf("read: exit %d, stderr %q", code, errOut)
+	}
+
+	// Without the link, the hint falls back to the plain command.
+	plain := newHarness(t)
+	plain.policy = filepath.Join(t.TempDir(), "none.json")
+	if _, out, _ = plain.run(t, "doctor"); !strings.Contains(out, "run  wa allow --match <name>") {
+		t.Fatalf("default hint:\n%s", out)
+	}
+
+	// An installed wacli is still reported.
+	withWacli := newHarness(t)
+	withWacli.wacli = filepath.Join(t.TempDir(), "wacli")
+	if err := os.WriteFile(withWacli.wacli, []byte("x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, out, _ = withWacli.run(t, "doctor"); !strings.Contains(out, "wacli") {
+		t.Fatalf("an installed wacli must be reported:\n%s", out)
 	}
 }
 

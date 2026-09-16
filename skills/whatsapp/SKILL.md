@@ -16,8 +16,8 @@ argument-hint: "[chat name or JID] [what to do]"
 
 All work goes through one command: `wa`. The plugin puts it on PATH.
 
-- The first `wa` call downloads the binary for this plugin version with `gh`, then checks its SHA-256 sum.
-- The download needs `gh auth login` with read access to the private repo `scastillo/wa`.
+- The first `wa` call downloads the binary for this plugin version, then checks its SHA-256 sum.
+- The download comes from the public release. It needs no GitHub account.
 
 ## 0. Rules that never bend.
 
@@ -41,7 +41,7 @@ Run `wa doctor`. Each line starts with `ok`, `warn` or `FAIL`.
 | `FAIL data … open WhatsApp Desktop, then retry` | SQLite needs a recovery that only the app can do | Ask the user to open WhatsApp Desktop. |
 | `warn app … not running` | New messages do not reach this Mac | Tell the user if they wait for messages. |
 | `warn allowlist … no chat allowed` | No chat is readable | Tell the user to run the `wa allow` command from rule 2 in their own terminal. |
-| `wa: cannot download …` | `gh` has no access to the release | Ask the user to run `gh auth status` and to check their read access to `scastillo/wa`. |
+| `wa: cannot download …` | The release download failed | Report the message. Ask the user to check their network, then retry once. |
 | `wa: … does not match the release checksum` | The download is not the released binary | Stop. Report it. Do not retry in a loop. |
 
 ## 2. Find the chat.

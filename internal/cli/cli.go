@@ -33,8 +33,18 @@ const (
 const (
 	defaultLimit = 50
 	staleAfter   = 3 * 24 * time.Hour
-	allowHint    = "run  wa allow --match <name>  in your own terminal"
 )
+
+// allowHint tells the user how to add a chat. It names the command they can run
+// in their own terminal: plain `wa` exists only inside the agent session, so the
+// launcher passes the path of its own link instead.
+func allowHint(env Env) string {
+	cmd := env.AllowCmd
+	if cmd == "" {
+		cmd = "wa"
+	}
+	return "run  " + cmd + " allow --match <name>  in your own terminal"
+}
 
 const usage = `usage: wa <command> [flags]
 
@@ -68,6 +78,7 @@ type Env struct {
 	AppInstalled func() bool
 	AppRunning   func() bool
 	WacliPath    string
+	AllowCmd     string // the command the user runs in their own terminal, for wa allow
 	Downloads    string // default destination of wa media
 	Sleep        func(time.Duration)
 }
@@ -163,9 +174,9 @@ func pick(env Env, all []store.Chat, p *policy.Policy, query string) (store.Chat
 	case len(matches) == 1 && len(allowed) == 1:
 		return allowed[0], exitOK
 	case len(allowed) == 0 && len(p.Allow) == 0:
-		return store.Chat{}, fail(env, exitNotAllowed, "no chat is on the allowlist yet; %s", allowHint)
+		return store.Chat{}, fail(env, exitNotAllowed, "no chat is on the allowlist yet; %s", allowHint(env))
 	case len(allowed) == 0:
-		return store.Chat{}, fail(env, exitNotAllowed, "that chat is not on the allowlist; %s", allowHint)
+		return store.Chat{}, fail(env, exitNotAllowed, "that chat is not on the allowlist; %s", allowHint(env))
 	}
 	return store.Chat{}, listCandidates(env, allowed, hidden)
 }
@@ -256,7 +267,7 @@ func chats(args []string, env Env) int {
 		fmt.Fprintf(out, "(%s not on the allowlist)\n", plural(hidden, "chat"))
 	}
 	if len(p.Allow) == 0 {
-		fmt.Fprintf(env.Stderr, "wa: no chat is on the allowlist yet; %s\n", allowHint)
+		fmt.Fprintf(env.Stderr, "wa: no chat is on the allowlist yet; %s\n", allowHint(env))
 	}
 	return exitOK
 }
@@ -347,7 +358,7 @@ func search(args []string, env Env) int {
 		}
 	}
 	if len(p.Allow) == 0 {
-		fmt.Fprintf(env.Stderr, "wa: no chat is on the allowlist yet; %s\n", allowHint)
+		fmt.Fprintf(env.Stderr, "wa: no chat is on the allowlist yet; %s\n", allowHint(env))
 	}
 	if q.Limit == 0 {
 		q.Limit = defaultLimit
@@ -528,15 +539,14 @@ func doctor(env Env) int {
 	if p, err := policy.Load(env.PolicyPath); err != nil {
 		report("FAIL", "allowlist", "%v", err)
 	} else if len(p.Allow) == 0 {
-		report("warn", "allowlist", "no chat allowed; %s", allowHint)
+		report("warn", "allowlist", "no chat allowed; %s", allowHint(env))
 	} else {
 		report("ok", "allowlist", "%s allowed (%s)", plural(len(p.Allow), "chat"), env.PolicyPath)
 	}
 
+	// Reading needs no wacli, so a missing one is not worth a line.
 	if _, err := os.Stat(env.WacliPath); err == nil {
 		report("ok", "wacli", "installed at %s (phone link not checked yet)", env.WacliPath)
-	} else {
-		report("warn", "wacli", "not installed at %s; phone-only files are unavailable", env.WacliPath)
 	}
 
 	if failed {

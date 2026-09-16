@@ -1,5 +1,5 @@
-// Package plugin_test checks the Claude Code plugin files: the bin/wa launcher
-// and the manifests. It has no Go code of its own.
+// Package plugin_test checks the plugin files: the bin/wa launcher and the
+// manifests. It has no Go code of its own.
 package plugin_test
 
 import (
@@ -48,13 +48,14 @@ func readJSON(t *testing.T, path string, v any) {
 }
 
 type shim struct {
-	root, home, fakeBin, ghLog string
-	env                        []string
+	root, home, fakeBin, curlLog string
+	env                          []string
 }
 
 // newShim copies bin/wa and the real plugin.json (with a test version) into a
 // fresh plugin root, so a local dist/wa in this checkout cannot answer for the
-// release path. uname is faked; PATH has no gh unless a test adds one.
+// release path. uname is faked. PATH holds no gh, which proves the launcher
+// needs no GitHub account.
 func newShim(t *testing.T, sysName, machine string) *shim {
 	t.Helper()
 	dir := t.TempDir()
@@ -62,7 +63,7 @@ func newShim(t *testing.T, sysName, machine string) *shim {
 		root:    filepath.Join(dir, "plugin"),
 		home:    filepath.Join(dir, "home"),
 		fakeBin: filepath.Join(dir, "fakebin"),
-		ghLog:   filepath.Join(dir, "gh.log"),
+		curlLog: filepath.Join(dir, "curl.log"),
 	}
 	launcher, err := os.ReadFile(filepath.Join(repoRoot(t), "bin", "wa"))
 	if err != nil {
@@ -89,35 +90,38 @@ func newShim(t *testing.T, sysName, machine string) *shim {
 	if err := os.MkdirAll(s.home, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	s.env = []string{"HOME=" + s.home, "PATH=" + s.fakeBin + ":/usr/bin:/bin", "GH_LOG=" + s.ghLog}
+	s.env = []string{"HOME=" + s.home, "PATH=" + s.fakeBin + ":/usr/bin:/bin", "CURL_LOG=" + s.curlLog}
 	return s
 }
 
-const fakeGh = `#!/bin/sh
-echo "$*" >> "$GH_LOG"
-pat= out=
+// fakeCurl serves the release: the last argument is the URL, and -o names the
+// file to write. Without -o it writes to stdout, as the launcher expects for
+// SHA256SUMS.
+const fakeCurl = `#!/bin/sh
+echo "$*" >> "$CURL_LOG"
+out= url=
 while [ $# -gt 0 ]; do
-  case $1 in -p) pat=$2; shift ;; -O) out=$2; shift ;; esac
+  case $1 in -o) out=$2; shift ;; -*) ;; *) url=$1 ;; esac
   shift
 done
-case $pat in
-  SHA256SUMS) cat "$FAKE_SUMS" ;;
-  wa-darwin-*) cp "$FAKE_ASSET" "$out" ;;
-  *) exit 1 ;;
+case $url in
+  */SHA256SUMS) if [ -n "$out" ]; then cp "$FAKE_SUMS" "$out"; else cat "$FAKE_SUMS"; fi ;;
+  */wa-darwin-*) cp "$FAKE_ASSET" "$out" ;;
+  *) exit 22 ;;
 esac
 `
 
-// withRelease adds a fake gh that serves asset as the binary and sums(sha of
+// withRelease adds a fake curl that serves asset as the binary and sums(sha of
 // asset) as SHA256SUMS.
 func (s *shim) withRelease(t *testing.T, asset string, sums func(sha string) string) {
 	t.Helper()
-	dir := filepath.Dir(s.ghLog)
+	dir := filepath.Dir(s.curlLog)
 	assetPath := filepath.Join(dir, "asset")
 	write(t, assetPath, asset, 0o755)
 	sum := sha256.Sum256([]byte(asset))
 	sumsPath := filepath.Join(dir, "SHA256SUMS")
 	write(t, sumsPath, sums(hex.EncodeToString(sum[:])), 0o644)
-	write(t, filepath.Join(s.fakeBin, "gh"), fakeGh, 0o755)
+	write(t, filepath.Join(s.fakeBin, "curl"), fakeCurl, 0o755)
 	s.env = append(s.env, "FAKE_ASSET="+assetPath, "FAKE_SUMS="+sumsPath)
 }
 
@@ -140,9 +144,9 @@ func (s *shim) run(t *testing.T, env []string, args ...string) (stdout, stderr s
 
 func (s *shim) cache() string { return filepath.Join(s.home, ".local", "share", "wa", "bin") }
 
-func (s *shim) ghCalls(t *testing.T) string {
+func (s *shim) curlCalls(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile(s.ghLog)
+	b, err := os.ReadFile(s.curlLog)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatal(err)
 	}
@@ -173,10 +177,13 @@ func TestShimDownloadsVerifiesAndCachesTheReleaseOnFirstRun(t *testing.T) {
 	if code != 0 || out != "release read two words\n" {
 		t.Fatalf("first run: code %d, stdout %q, stderr %q", code, out, errOut)
 	}
-	calls := s.ghCalls(t)
-	for _, want := range []string{"release download v9.9.9", "-R scastillo/wa", "-p wa-darwin-amd64", "-p SHA256SUMS"} {
+	calls := s.curlCalls(t)
+	for _, want := range []string{
+		"https://github.com/scastillo/wa/releases/download/v9.9.9/wa-darwin-amd64",
+		"https://github.com/scastillo/wa/releases/download/v9.9.9/SHA256SUMS",
+	} {
 		if !strings.Contains(calls, want) {
-			t.Fatalf("gh calls miss %q:\n%s", want, calls)
+			t.Fatalf("curl calls miss %q:\n%s", want, calls)
 		}
 	}
 	fi, err := os.Stat(filepath.Join(s.cache(), "wa-9.9.9-darwin-amd64"))
@@ -184,16 +191,16 @@ func TestShimDownloadsVerifiesAndCachesTheReleaseOnFirstRun(t *testing.T) {
 		t.Fatalf("cached binary: %v %v", fi, err)
 	}
 	if link, err := os.Readlink(filepath.Join(s.cache(), "wa")); err != nil || link != "wa-9.9.9-darwin-amd64" {
-		t.Fatalf("stable link for the owner's terminal: %q %v", link, err)
+		t.Fatalf("stable link for the user's terminal: %q %v", link, err)
 	}
 	if got := strings.Join(s.cacheEntries(t), " "); got != "wa wa-9.9.9-darwin-amd64" {
 		t.Fatalf("cache must hold only the binary and the link, got %q", got)
 	}
 
-	write(t, s.ghLog, "", 0o644)
+	write(t, s.curlLog, "", 0o644)
 	out, errOut, code = s.run(t, s.env, "doctor")
-	if code != 0 || out != "release doctor\n" || s.ghCalls(t) != "" {
-		t.Fatalf("second run must use the cache: code %d, stdout %q, stderr %q, gh %q", code, out, errOut, s.ghCalls(t))
+	if code != 0 || out != "release doctor\n" || s.curlCalls(t) != "" {
+		t.Fatalf("second run must use the cache: code %d, stdout %q, stderr %q, curl %q", code, out, errOut, s.curlCalls(t))
 	}
 }
 
@@ -219,24 +226,14 @@ func TestShimRejectsABinaryThatTheChecksumsDoNotVouchFor(t *testing.T) {
 
 func TestShimReportsADownloadFailure(t *testing.T) {
 	s := newShim(t, "Darwin", "arm64")
-	write(t, filepath.Join(s.fakeBin, "gh"), "#!/bin/sh\necho \"$*\" >> \"$GH_LOG\"\necho 'HTTP 404: Not Found' >&2\nexit 1\n", 0o755)
+	write(t, filepath.Join(s.fakeBin, "curl"),
+		"#!/bin/sh\necho \"$*\" >> \"$CURL_LOG\"\necho 'curl: (22) The requested URL returned error: 404' >&2\nexit 22\n", 0o755)
 	out, errOut, code := s.run(t, s.env, "doctor")
-	if code != 1 || out != "" || !strings.Contains(errOut, "HTTP 404") || !strings.Contains(errOut, "gh auth status") {
+	if code != 1 || out != "" || !strings.Contains(errOut, "404") || !strings.Contains(errOut, "cannot download") {
 		t.Fatalf("code %d, stdout %q, stderr %q", code, out, errOut)
 	}
 	if got := s.cacheEntries(t); len(got) != 0 {
 		t.Fatalf("nothing may stay in the cache, got %v", got)
-	}
-}
-
-func TestShimExplainsHowToGetGh(t *testing.T) {
-	if _, err := exec.LookPath("/usr/bin/gh"); err == nil {
-		t.Skip("gh is in /usr/bin, so PATH cannot hide it")
-	}
-	s := newShim(t, "Darwin", "arm64")
-	_, errOut, code := s.run(t, s.env, "doctor")
-	if code != 1 || !strings.Contains(errOut, "gh auth login") {
-		t.Fatalf("code %d, stderr %q", code, errOut)
 	}
 }
 
@@ -248,8 +245,8 @@ func TestShimRunsOnlyOnMacs(t *testing.T) {
 		s := newShim(t, c.sys, c.machine)
 		s.withRelease(t, "#!/bin/sh\necho no\n", func(sha string) string { return sha + "  wa-darwin-arm64\n" })
 		out, errOut, code := s.run(t, s.env, "doctor")
-		if code != 1 || out != "" || !strings.Contains(errOut, c.want) || s.ghCalls(t) != "" {
-			t.Fatalf("%s %s: code %d, stdout %q, stderr %q, gh %q", c.sys, c.machine, code, out, errOut, s.ghCalls(t))
+		if code != 1 || out != "" || !strings.Contains(errOut, c.want) || s.curlCalls(t) != "" {
+			t.Fatalf("%s %s: code %d, stdout %q, stderr %q, curl %q", c.sys, c.machine, code, out, errOut, s.curlCalls(t))
 		}
 	}
 }
@@ -280,7 +277,7 @@ func TestShimPrefersWABinThenALocalBuildThenTheCache(t *testing.T) {
 	if out, errOut, code := s.run(t, s.env, "chats"); code != 0 || out != "cache chats\n" {
 		t.Fatalf("cache: code %d, stdout %q, stderr %q", code, out, errOut)
 	}
-	if calls := s.ghCalls(t); calls != "" {
+	if calls := s.curlCalls(t); calls != "" {
 		t.Fatalf("no step may download: %q", calls)
 	}
 }
