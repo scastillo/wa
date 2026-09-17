@@ -44,5 +44,17 @@ fi
 head=$(git rev-parse HEAD)
 git fetch --quiet origin main
 [ "$head" = "$(git rev-parse origin/main)" ] || die "HEAD is not origin/main. Push main first"
-gh release create "v$version" -R "$repo" --target "$head" --title "wa $version" \
-	--notes-file dist/NOTES.md dist/wa-darwin-arm64 dist/wa-darwin-amd64 dist/SHA256SUMS
+# Create the release first, then upload each asset with retries: GitHub's upload
+# endpoint returns HTTP 500 often enough that one failure rolls the whole release
+# back (measured 2026-09-17).
+gh release create "v$version" -R "$repo" --target "$head" --title "wa $version" --notes-file dist/NOTES.md
+for f in wa-darwin-arm64 wa-darwin-amd64 SHA256SUMS; do
+	try=1
+	until gh release upload "v$version" "dist/$f" -R "$repo" --clobber; do
+		try=$((try + 1))
+		[ "$try" -le 5 ] || die "cannot upload $f after 5 tries. Upload it by hand, then check the release"
+		echo "release: upload of $f failed; try $try"
+		sleep 5
+	done
+done
+gh release view "v$version" -R "$repo" --json assets --jq '[.assets[].name]'
