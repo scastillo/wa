@@ -10,7 +10,7 @@
     {
       "name": "wa",
       "description": "Read, search and watch WhatsApp Desktop chats on a Mac, read-only, and save their attachments. Only chats on the user's allowlist are readable.",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "source": "./"
     }
   ]

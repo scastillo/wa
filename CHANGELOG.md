@@ -3,6 +3,13 @@
 This file lists all notable changes to the wa plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.3] - 2026-09-17
+
+### Changed
+
+- The skill treats `wa allow --all` as the normal setup for daily use, instead of a last resort.
+- The skill carries the step-by-step recipe for the main job: watch one group and keep its files on disk.
+
 ## [0.1.2] - 2026-09-17
 
 ### Added

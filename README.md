@@ -56,6 +56,14 @@ The skill runs these commands:
 
 Exit codes: 0 ok, 1 error, 2 more than one chat matches, 3 the chat is not on the allowlist.
 
+## Keep a group's files on disk.
+
+Ask Claude: "save the photos from the book club group, and tell me when new ones arrive". It then:
+
+1. Saves what is already there with `wa media <JID>`.
+2. Seeds a watcher once, and waits with `wa watch --state <file> --chat <JID> --wait 540 --poll 15`.
+3. Runs `wa media <JID>` again on each new file, which saves only what is new.
+
 ## Privacy.
 
 - `wa` opens WhatsApp's databases read-only. It never writes to WhatsApp's folder.
