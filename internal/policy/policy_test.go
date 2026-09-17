@@ -81,3 +81,35 @@ func TestAddSaveLoadRemove(t *testing.T) {
 		t.Fatal("removing an absent chat must report no change")
 	}
 }
+
+func TestAllowAllOpensEveryChatAndSurvivesASave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.json")
+	p, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Add("111@g.us", "2026-09-17")
+	if p.Allowed("222@g.us") {
+		t.Fatal("a chat outside the list must stay closed")
+	}
+
+	p.All = true
+	if !p.Allowed("222@g.us") || !p.Allowed("anything@s.whatsapp.net") {
+		t.Fatal("allow-all must open every chat")
+	}
+	if err := p.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load(path)
+	if err != nil || !back.All || !back.Allowed("brand-new@g.us") {
+		t.Fatalf("allow-all must survive a save: %+v %v", back, err)
+	}
+
+	back.All = false
+	if back.Allowed("222@g.us") {
+		t.Fatal("turning allow-all off must close the other chats again")
+	}
+	if !back.Allowed("111@g.us") {
+		t.Fatal("the per-chat list must survive allow-all")
+	}
+}

@@ -22,17 +22,16 @@ A Claude Code plugin that reads WhatsApp Desktop data on a Mac.
    - It checks the binary against the release `SHA256SUMS` before it runs it.
    - macOS can ask for access to other apps' data. Allow it, or `wa` cannot read the chats.
 
-## Allow a chat.
+## Allow chats.
 
-Claude reads no chat until you allow it. Run this in your own terminal app, not in Claude Code:
+Claude reads no chat until you allow it. Pick one way:
 
-```sh
-~/.local/share/wa/bin/wa allow --match "part of the chat name"
-```
+- **Ask Claude:** "allow the book club chat in WhatsApp". It runs `wa allow --match "book club"` for you.
+- **Your own terminal:** `~/.local/share/wa/bin/wa allow --match "part of the chat name"`. That link exists after the first `wa` call in Claude Code.
+- **Allow everything:** `wa allow --all`. Every chat becomes readable, now and in the future. `wa doctor` then says so on every check. Undo with `wa disallow --all`, which puts the per-chat list back in charge.
 
-- `wa allow` refuses to run without a terminal, so chat names never reach the AI session.
-- The link `~/.local/share/wa/bin/wa` exists after the first `wa` call in Claude Code.
-- The allowlist is `~/.config/wa/policy.json`. Remove a chat with `wa disallow <chat>`.
+- The allowlist is `~/.config/wa/policy.json`. Remove one chat with `wa disallow <chat>`.
+- With allow-all on, `wa watch` wakes on any chat. Give it `--chat <JID>` to wait for one chat.
 - macOS can ask your terminal for access to other apps' data. Allow it.
 
 ## Use.

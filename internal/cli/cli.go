@@ -2,7 +2,8 @@
 //
 // Privacy rule: a chat that is not on the allowlist never has its name, JID or
 // text written to stdout or stderr. Commands only print a count of such chats.
-// The one exception is `wa allow`, which runs only in the owner's own terminal.
+// The one exception is `wa allow`, which must name the candidates it could add.
+// `wa allow --all` turns the allowlist off, and then nothing is hidden.
 package cli
 
 import (
@@ -39,11 +40,15 @@ const (
 // in their own terminal: plain `wa` exists only inside the agent session, so the
 // launcher passes the path of its own link instead.
 func allowHint(env Env) string {
-	cmd := env.AllowCmd
-	if cmd == "" {
-		cmd = "wa"
+	return "run  " + cmdName(env) + " allow --match <name>"
+}
+
+// cmdName is how the user starts wa in their own terminal.
+func cmdName(env Env) string {
+	if env.AllowCmd == "" {
+		return "wa"
 	}
-	return "run  " + cmd + " allow --match <name>  in your own terminal"
+	return env.AllowCmd
 }
 
 const usage = `usage: wa <command> [flags]
@@ -51,8 +56,8 @@ const usage = `usage: wa <command> [flags]
 commands:
   doctor                   check WhatsApp data, schema, allowlist and tools
   chats    [--match T] [--groups|--dms] [--limit N] [--json]
-  allow    --match T       add a chat to the allowlist (your own terminal only)
-  disallow <chat>          remove a chat from the allowlist
+  allow    --match T|--all add one chat, or every chat, to the allowlist
+  disallow <chat>|--all    remove one chat, or turn allow-all off
   read     <chat> [--since D] [--until D] [--limit N] [--full] [--json]
   search   <text> [--chat C] [--since D] [--until D] [--limit N] [--full] [--json]
   media    <chat> [--since D] [--until D|--before D] [--limit N] [--type image,video,audio,document,sticker]
@@ -266,7 +271,7 @@ func chats(args []string, env Env) int {
 	if hidden > 0 {
 		fmt.Fprintf(out, "(%s not on the allowlist)\n", plural(hidden, "chat"))
 	}
-	if len(p.Allow) == 0 {
+	if !p.All && len(p.Allow) == 0 {
 		fmt.Fprintf(env.Stderr, "wa: no chat is on the allowlist yet; %s\n", allowHint(env))
 	}
 	return exitOK
@@ -357,7 +362,7 @@ func search(args []string, env Env) int {
 			}
 		}
 	}
-	if len(p.Allow) == 0 {
+	if !p.All && len(p.Allow) == 0 {
 		fmt.Fprintf(env.Stderr, "wa: no chat is on the allowlist yet; %s\n", allowHint(env))
 	}
 	if q.Limit == 0 {
@@ -372,11 +377,9 @@ func search(args []string, env Env) int {
 }
 
 func allow(args []string, env Env) int {
-	if !env.IsTTY() {
-		return fail(env, exitError, "wa allow must run in your own terminal, so chat names never reach an AI session")
-	}
 	fs := newFlags("allow", env)
 	match := fs.String("match", "", "part of a chat name, a JID or a chat number")
+	every := fs.Bool("all", false, "allow every chat, now and in the future")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return exitError
@@ -384,8 +387,14 @@ func allow(args []string, env Env) int {
 	if *match == "" && len(pos) == 1 {
 		*match = pos[0]
 	}
+	if *every {
+		if *match != "" {
+			return fail(env, exitError, "use either --all or --match <name>, not both")
+		}
+		return allowEvery(env)
+	}
 	if *match == "" {
-		return fail(env, exitError, "allow needs --match <name>")
+		return fail(env, exitError, "allow needs --match <name>, or --all for every chat")
 	}
 	s, p, code := load(env)
 	if code != exitOK {
@@ -403,6 +412,15 @@ func allow(args []string, env Env) int {
 	in := bufio.NewReader(env.Stdin)
 	chosen := matches[0]
 	if len(matches) > 1 {
+		// Without a terminal there is nobody to answer, so name the candidates
+		// and let the caller pick one by JID.
+		if !env.IsTTY() {
+			fmt.Fprintln(env.Stderr, "wa: more than one chat matches; allow one by JID:")
+			for _, c := range matches {
+				fmt.Fprintf(env.Stderr, "  %s\n", chatLine(c, env))
+			}
+			return exitAmbiguous
+		}
 		for i, c := range matches {
 			fmt.Fprintf(env.Stdout, "%d) %s\n", i+1, chatLine(c, env))
 		}
@@ -417,10 +435,12 @@ func allow(args []string, env Env) int {
 		fmt.Fprintf(env.Stdout, "%s is already allowed\n", chosen.JID)
 		return exitOK
 	}
-	fmt.Fprintf(env.Stdout, "Allow wa to print messages from %s (%s)? [y/N] ", render.Clean(chosen.Name), chosen.JID)
-	if answer := strings.ToLower(readLine(in)); answer != "y" && answer != "yes" {
-		fmt.Fprintln(env.Stdout, "nothing changed")
-		return exitError
+	if env.IsTTY() {
+		fmt.Fprintf(env.Stdout, "Allow wa to print messages from %s (%s)? [y/N] ", render.Clean(chosen.Name), chosen.JID)
+		if answer := strings.ToLower(readLine(in)); answer != "y" && answer != "yes" {
+			fmt.Fprintln(env.Stdout, "nothing changed")
+			return exitError
+		}
 	}
 	p.Add(chosen.JID, env.Now().In(env.Location).Format("2006-01-02"))
 	if err := p.Save(env.PolicyPath); err != nil {
@@ -430,11 +450,53 @@ func allow(args []string, env Env) int {
 	return exitOK
 }
 
+// allowEvery turns the allowlist off: every chat becomes readable. The per-chat
+// list stays, so disallow --all puts it back in charge.
+func allowEvery(env Env) int {
+	p, err := policy.Load(env.PolicyPath)
+	if err != nil {
+		return fail(env, exitError, "%v", err)
+	}
+	if p.All {
+		fmt.Fprintln(env.Stdout, "every chat is already allowed")
+		return exitOK
+	}
+	if env.IsTTY() {
+		fmt.Fprint(env.Stdout, "Allow wa to print messages from EVERY chat, now and in the future? [y/N] ")
+		if answer := strings.ToLower(readLine(bufio.NewReader(env.Stdin))); answer != "y" && answer != "yes" {
+			fmt.Fprintln(env.Stdout, "nothing changed")
+			return exitError
+		}
+	}
+	p.All = true
+	if err := p.Save(env.PolicyPath); err != nil {
+		return fail(env, exitError, "save allowlist: %v", err)
+	}
+	fmt.Fprintf(env.Stdout, "every chat is now readable by an AI session. Undo with  %s disallow --all\n", cmdName(env))
+	return exitOK
+}
+
 func disallow(args []string, env Env) int {
 	fs := newFlags("disallow", env)
+	every := fs.Bool("all", false, "turn allow-all off, so only listed chats stay readable")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return exitError
+	}
+	if *every {
+		if len(pos) != 0 {
+			return fail(env, exitError, "use either --all or a <chat>, not both")
+		}
+		p, err := policy.Load(env.PolicyPath)
+		if err != nil {
+			return fail(env, exitError, "%v", err)
+		}
+		p.All = false
+		if err := p.Save(env.PolicyPath); err != nil {
+			return fail(env, exitError, "save allowlist: %v", err)
+		}
+		fmt.Fprintf(env.Stdout, "allow-all is off; %s stay readable\n", plural(len(p.Allow), "chat"))
+		return exitOK
 	}
 	if len(pos) != 1 {
 		return fail(env, exitError, "disallow needs exactly one <chat>")
@@ -538,6 +600,8 @@ func doctor(env Env) int {
 
 	if p, err := policy.Load(env.PolicyPath); err != nil {
 		report("FAIL", "allowlist", "%v", err)
+	} else if p.All {
+		report("warn", "allowlist", "every chat is readable; undo with  %s disallow --all", cmdName(env))
 	} else if len(p.Allow) == 0 {
 		report("warn", "allowlist", "no chat allowed; %s", allowHint(env))
 	} else {

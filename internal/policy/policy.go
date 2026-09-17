@@ -18,9 +18,11 @@ import (
 
 const version = 1
 
-// Policy is the allowlist file.
+// Policy is the allowlist file. All opens every chat, now and in the future;
+// the Allow list stays as it is, so turning All off restores it.
 type Policy struct {
 	Version int     `json:"version"`
+	All     bool    `json:"allow_all,omitempty"`
 	Allow   []Entry `json:"allow"`
 }
 
@@ -67,7 +69,7 @@ func Load(path string) (*Policy, error) {
 
 // Allowed reports whether wa may print text from the chat.
 func (p *Policy) Allowed(jid string) bool {
-	return slices.ContainsFunc(p.Allow, func(e Entry) bool { return e.JID == jid })
+	return p.All || slices.ContainsFunc(p.Allow, func(e Entry) bool { return e.JID == jid })
 }
 
 // Add allows a chat. It reports whether the allowlist changed.

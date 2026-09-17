@@ -3,6 +3,17 @@
 This file lists all notable changes to the wa plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.2] - 2026-09-17
+
+### Added
+
+- `wa allow --all` opens every chat, now and in the future. `wa disallow --all` turns it off and puts the per-chat list back in charge.
+- `wa doctor` says on every check when allow-all is on.
+
+### Changed
+
+- `wa allow` no longer needs a terminal, so an agent can run it once the user says yes. With more than one match and no terminal, it names the candidates, exits 2 and changes nothing.
+
 ## [0.1.1] - 2026-09-16
 
 ### Changed

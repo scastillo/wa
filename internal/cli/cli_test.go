@@ -202,17 +202,60 @@ func TestMalformedPolicyFailsClosed(t *testing.T) {
 	}
 }
 
-func TestAllowRefusesWithoutATerminal(t *testing.T) {
+func TestAllowWorksWithoutATerminal(t *testing.T) {
 	h := newHarness(t)
-	h.stdin = "y\n"
 	code, out, errOut := h.run(t, "allow", "--match", "Ana")
-	if code != 1 || !strings.Contains(errOut, "terminal") {
-		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	if code != 0 {
+		t.Fatalf("an agent must be able to allow a chat: exit %d\n%s%s", code, out, errOut)
 	}
-	mustNotLeak(t, "allow without tty", out, errOut)
 	p, err := policy.Load(h.policy)
-	if err != nil || p.Allowed("5731@s.whatsapp.net") {
-		t.Fatal("the allowlist must not change")
+	if err != nil || !p.Allowed("5731@s.whatsapp.net") {
+		t.Fatalf("allowlist: %+v %v", p, err)
+	}
+
+	// Two matches and nobody to ask: name them and change nothing.
+	code, out, errOut = h.run(t, "allow", "--match", "family")
+	if code != exitAmbiguous || !strings.Contains(errOut, "222@g.us") || !strings.Contains(errOut, "111@g.us") {
+		t.Fatalf("ambiguous: exit %d\n%s%s", code, out, errOut)
+	}
+	p, _ = policy.Load(h.policy)
+	if p.Allowed("222@g.us") {
+		t.Fatal("an ambiguous match must change nothing")
+	}
+}
+
+func TestAllowAllOpensEveryChatAndDisallowAllCloses(t *testing.T) {
+	h := newHarness(t)
+	if code, _, _ := h.run(t, "read", "222@g.us"); code != exitNotAllowed {
+		t.Fatal("the second chat must start blocked")
+	}
+
+	code, out, errOut := h.run(t, "allow", "--all")
+	if code != 0 || !strings.Contains(out, "every chat") {
+		t.Fatalf("allow --all: exit %d\n%s%s", code, out, errOut)
+	}
+	if code, out, _ = h.run(t, "read", "222@g.us"); code != 0 || !strings.Contains(out, "SECRET-DOCTOR hello") {
+		t.Fatalf("read after allow --all: exit %d\n%s", code, out)
+	}
+	if _, out, _ = h.run(t, "doctor"); !strings.Contains(out, "every chat is readable") {
+		t.Fatalf("doctor must say the allowlist is off:\n%s", out)
+	}
+	if _, out, errOut = h.run(t, "chats"); strings.Contains(out+errOut, "allowlist") {
+		t.Fatalf("chats must hide nothing and must not ask for an allowlist:\n%s%s", out, errOut)
+	}
+	if _, out, errOut = h.run(t, "search", "hello"); strings.Contains(errOut, "allowlist") ||
+		!strings.Contains(out, "SECRET-ANA hello") {
+		t.Fatalf("search must cover every chat:\n%s%s", out, errOut)
+	}
+
+	if code, out, errOut = h.run(t, "disallow", "--all"); code != 0 || !strings.Contains(out, "1 chat") {
+		t.Fatalf("disallow --all: exit %d\n%s%s", code, out, errOut)
+	}
+	if code, _, _ = h.run(t, "read", "222@g.us"); code != exitNotAllowed {
+		t.Fatal("disallow --all must close the other chats again")
+	}
+	if code, _, _ = h.run(t, "read", "111@g.us"); code != 0 {
+		t.Fatal("the chat that was on the list must stay readable")
 	}
 }
 
