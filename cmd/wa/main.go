@@ -2,7 +2,10 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,10 +52,40 @@ func main() {
 		},
 		AppRunning: func() bool { return exec.Command("pgrep", "-x", "WhatsApp").Run() == nil },
 		WacliPath:  filepath.Join(home, ".local", "share", "wa", "bin", "wacli"),
+		WacliStore: filepath.Join(home, ".local", "share", "wa", "wacli"),
+		SendState:  filepath.Join(home, ".local", "share", "wa", "send-state.json"),
 		AllowCmd:   allowCmd(home),
+		Jitter:     jitter,
+		Exec:       run,
 		Downloads:  filepath.Join(home, "Downloads", "whatsapp"),
 		Sleep:      time.Sleep,
 	}))
+}
+
+// run executes another program and collects its output. wa uses it for wacli.
+func run(bin string, args, extraEnv []string) (string, string, int) {
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(os.Environ(), extraEnv...)
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	code := 0
+	if err := cmd.Run(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		} else {
+			return out.String(), errOut.String() + err.Error(), 1
+		}
+	}
+	return out.String(), errOut.String(), code
+}
+
+// jitter picks a pause between min and max, so sends do not fall on a fixed beat.
+func jitter(min, max time.Duration) time.Duration {
+	if max <= min {
+		return min
+	}
+	return min + time.Duration(rand.Int64N(int64(max-min)))
 }
 
 // allowCmd is what the user types in their own terminal to run wa. The plugin

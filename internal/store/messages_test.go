@@ -193,3 +193,23 @@ func pks(msgs []Message) string {
 	}
 	return strings.Join(s, " ")
 }
+
+func TestHasInboundSeparatesChatsThatWroteToUs(t *testing.T) {
+	fx := fixture.New(t)
+	seedMessages(t, fx)
+	s := openStore(t, fx)
+
+	// Chat 1 has incoming rows; a chat with only our own message has none.
+	fixture.Exec(t, fx.ChatStorage, `INSERT INTO ZWACHATSESSION (Z_PK, ZCONTACTJID, ZPARTNERNAME, ZSESSIONTYPE) VALUES (9, '999@s.whatsapp.net', 'Quiet', 0)`)
+	fixture.Exec(t, fx.ChatStorage, `INSERT INTO ZWAMESSAGE (Z_PK, ZCHATSESSION, ZMESSAGEDATE, ZISFROMME, ZTEXT, ZMESSAGETYPE) VALUES (90, 9, ?, 1, 'only me', 0)`,
+		ToCoreData(t0))
+	for _, c := range []struct {
+		pk   int64
+		want bool
+	}{{1, true}, {9, false}, {404, false}} {
+		got, err := s.HasInbound(c.pk)
+		if err != nil || got != c.want {
+			t.Fatalf("chat %d: got %v %v, want %v", c.pk, got, err, c.want)
+		}
+	}
+}

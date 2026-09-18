@@ -3,6 +3,23 @@
 This file lists all notable changes to the wa plugin.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.0] - 2026-09-18
+
+### Added
+
+- `wa send <chat> "<text>"` and `wa send <chat> --file <path>` write through a linked device (wacli). Reading stays read-only.
+- Guards that map to the ban codes WhatsApp returns:
+  - It never sends the first message in a chat (code 101 is about messages to people who do not have you in their contacts).
+  - The same text goes to at most 2 chats in 24 hours (code 104).
+  - At most 50 messages in 24 hours, with a 3 to 8 second pause between them.
+  - A temporary ban stops every later send until it expires. A logout stops sending until the user pairs again.
+- `wa send` shows the message and sends nothing without `--yes`. `--dry-run` shows it and exits 0.
+- Long text is split at 4,000 characters.
+
+### Note
+
+- Sending uses an unofficial linked device. It breaks WhatsApp's terms, and a ban hits the phone number, not the app. Reading never needed this.
+
 ## [0.1.3] - 2026-09-17
 
 ### Changed
