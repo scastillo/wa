@@ -63,6 +63,8 @@ commands:
   media    <chat> [--since D] [--until D|--before D] [--limit N] [--type image,video,audio,document,sticker]
            [--from S] [--dest DIR] [--dry-run] [--remote none|live|all] [--json]
            saves attachments; a chat not on the allowlist gets counts and name-free file names only
+  send     <chat> <text>|--file F [--caption C] [--dry-run] [--yes]
+           writes through the linked device; shows the message unless --yes is given
   watch    --state F [--seed] [--chat C]... [--wait S] [--poll S] [--full] [--json]
            one-shot: prints new messages and exits, or prints (no new messages) when --wait ends
 
@@ -83,9 +85,14 @@ type Env struct {
 	AppInstalled func() bool
 	AppRunning   func() bool
 	WacliPath    string
+	WacliStore   string // wacli's own store, where the linked-device session lives
+	SendState    string // where wa keeps its send history and any ban
 	AllowCmd     string // the command the user runs in their own terminal, for wa allow
 	Downloads    string // default destination of wa media
 	Sleep        func(time.Duration)
+	Jitter       func(min, max time.Duration) time.Duration
+	// Exec runs another program, for wacli. It returns its output and exit code.
+	Exec func(bin string, args, extraEnv []string) (stdout, stderr string, code int)
 }
 
 // Run executes one wa command and returns its exit code.
@@ -109,6 +116,8 @@ func Run(args []string, env Env) int {
 		return search(args[1:], env)
 	case "media":
 		return mediaCmd(args[1:], env)
+	case "send":
+		return sendCmd(args[1:], env)
 	case "watch":
 		return watchCmd(args[1:], env)
 	case "help", "-h", "--help":

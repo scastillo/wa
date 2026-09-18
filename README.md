@@ -64,6 +64,25 @@ Ask Claude: "save the photos from the book club group, and tell me when new ones
 2. Seeds a watcher once, and waits with `wa watch --state <file> --chat <JID> --wait 540 --poll 15`.
 3. Runs `wa media <JID>` again on each new file, which saves only what is new.
 
+## Send messages (optional).
+
+Reading needs nothing but your Mac. Sending needs a linked device, and that is a different decision.
+
+- **It breaks WhatsApp's terms.** A ban hits your phone number, not the app. Reports exist of bans on low-volume, reply-only accounts, so the risk is small but real.
+- Link once with the `wacli` binary in `~/.local/share/wa/bin/`: `wacli auth --phone <your number, digits only>`, then WhatsApp on your phone → Linked devices → Link with phone number.
+- Then: `wa send <chat> "text"` or `wa send <chat> --file photo.jpg --caption "look"`.
+
+`wa` refuses what gets numbers banned:
+
+| Guard | The ban code behind it |
+|---|---|
+| Never the first message in a chat | 101, messages to people who do not have you in their contacts |
+| The same text to at most 2 chats a day | 104, the same message too many times |
+| 50 messages a day, 3 to 8 seconds apart | bulk messaging |
+| Stops on a temporary ban until it expires; stops on a logout until you pair again | 402 and 401 |
+
+Nothing is sent without `--yes`. Without it, `wa send` prints the message and stops.
+
 ## Privacy.
 
 - `wa` opens WhatsApp's databases read-only. It never writes to WhatsApp's folder.

@@ -295,3 +295,15 @@ func dateFilter(q Query) (string, []any) {
 func escapeLike(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
+
+// HasInbound reports whether the chat ever wrote to the user. wa uses it to
+// refuse the first message in a chat: WhatsApp's ban code 101 is about messages
+// to people who do not have the sender in their contacts.
+func (s *Store) HasInbound(chatPK int64) (bool, error) {
+	var n int
+	err := Retry(func() error {
+		return s.Chat.QueryRow(`SELECT EXISTS(SELECT 1 FROM ZWAMESSAGE
+			WHERE ZCHATSESSION = ? AND COALESCE(ZISFROMME, 0) = 0)`, chatPK).Scan(&n)
+	})
+	return n == 1, err
+}

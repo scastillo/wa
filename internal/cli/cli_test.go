@@ -24,6 +24,11 @@ type harness struct {
 	appDown   bool
 	allowCmd  string // what doctor and the hints tell the user to run
 	wacli     string // where wa looks for wacli
+	sendState string
+	execCalls [][]string // what wa ran through Exec, for wacli
+	execOut   string
+	execErr   string
+	execCode  int
 
 	clock   time.Time       // advanced only by Sleep
 	sleeps  int             // how many times a command slept
@@ -46,7 +51,7 @@ func newHarness(t *testing.T) *harness {
 		(11, 2, ?, 0, '222@g.us', NULL, 'Dr', 'SECRET-DOCTOR hello', 0),
 		(12, 3, ?, 0, '5731@s.whatsapp.net', NULL, 'Ana', 'SECRET-ANA hello', 0)`, at(-time.Minute), at(-2*time.Minute), at(-3*time.Minute))
 	h := &harness{fx: fx, policy: filepath.Join(t.TempDir(), "policy.json"), clock: now,
-		wacli: filepath.Join(fx.Dir, "no-wacli")}
+		wacli: filepath.Join(fx.Dir, "no-wacli"), sendState: filepath.Join(t.TempDir(), "send-state.json")}
 	p, _ := policy.Load(h.policy)
 	p.Add("111@g.us", "2026-09-14")
 	if err := p.Save(h.policy); err != nil {
@@ -76,9 +81,16 @@ func (h *harness) run(t *testing.T, args ...string) (code int, stdout, stderr st
 				h.onSleep(h.sleeps)
 			}
 		},
-		WacliPath: h.wacli,
-		AllowCmd:  h.allowCmd,
-		Downloads: h.downloads,
+		WacliPath:  h.wacli,
+		WacliStore: h.wacli + "-store",
+		SendState:  h.sendState,
+		AllowCmd:   h.allowCmd,
+		Downloads:  h.downloads,
+		Jitter:     func(min, max time.Duration) time.Duration { return min },
+		Exec: func(bin string, args, extraEnv []string) (string, string, int) {
+			h.execCalls = append(h.execCalls, append([]string{bin}, args...))
+			return h.execOut, h.execErr, h.execCode
+		},
 	})
 	return code, out.String(), errOut.String()
 }
@@ -340,6 +352,89 @@ func TestHintsNameTheCommandTheUserCanRunAndDoctorSkipsWacli(t *testing.T) {
 	}
 	if _, out, _ = withWacli.run(t, "doctor"); !strings.Contains(out, "wacli") {
 		t.Fatalf("an installed wacli must be reported:\n%s", out)
+	}
+}
+
+func TestSendShowsTheMessageAndNeedsYes(t *testing.T) {
+	h := newHarness(t)
+
+	// Without --yes wa shows the message and sends nothing.
+	code, out, errOut := h.run(t, "send", "111@g.us", "hola familia")
+	if code != exitError || !strings.Contains(out, "hola familia") || !strings.Contains(errOut, "--yes") {
+		t.Fatalf("preview: exit %d\n%s%s", code, out, errOut)
+	}
+	if len(h.execCalls) != 0 {
+		t.Fatalf("nothing may run without --yes: %v", h.execCalls)
+	}
+
+	// --dry-run is the same preview, but it is not an error.
+	if code, out, _ = h.run(t, "send", "111@g.us", "hola", "--dry-run"); code != exitOK || !strings.Contains(out, "hola") {
+		t.Fatalf("dry run: exit %d\n%s", code, out)
+	}
+	if len(h.execCalls) != 0 {
+		t.Fatalf("a dry run must not run wacli: %v", h.execCalls)
+	}
+
+	// With --yes it calls wacli once, with the chat and the text.
+	code, out, errOut = h.run(t, "send", "111@g.us", "hola familia", "--yes")
+	if code != exitOK || !strings.Contains(out, "sent 1 message") {
+		t.Fatalf("send: exit %d\n%s%s", code, out, errOut)
+	}
+	if len(h.execCalls) != 1 {
+		t.Fatalf("calls: %v", h.execCalls)
+	}
+	got := strings.Join(h.execCalls[0], " ")
+	for _, want := range []string{h.wacli, "send text", "--to 111@g.us", "--message hola familia"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("wacli call misses %q: %s", want, got)
+		}
+	}
+}
+
+func TestSendObeysTheAllowlistAndNeverWritesFirst(t *testing.T) {
+	h := newHarness(t)
+	code, out, errOut := h.run(t, "send", "222@g.us", "hola", "--yes")
+	if code != exitNotAllowed {
+		t.Fatalf("a chat that is not allowed: exit %d\n%s%s", code, out, errOut)
+	}
+	mustNotLeak(t, "send to a blocked chat", out, errOut)
+	if len(h.execCalls) != 0 {
+		t.Fatalf("nothing may run: %v", h.execCalls)
+	}
+
+	// An allowed chat that never wrote to us is still refused.
+	fixture.Exec(t, h.fx.ChatStorage, `INSERT INTO ZWACHATSESSION (Z_PK, ZCONTACTJID, ZPARTNERNAME, ZSESSIONTYPE) VALUES (4, '444@s.whatsapp.net', 'Quiet', 0)`)
+	fixture.Exec(t, h.fx.ChatStorage, `INSERT INTO ZWAMESSAGE (Z_PK, ZCHATSESSION, ZMESSAGEDATE, ZISFROMME, ZTEXT, ZMESSAGETYPE) VALUES (40, 4, ?, 1, 'only me', 0)`,
+		store.ToCoreData(now))
+	p, _ := policy.Load(h.policy)
+	p.Add("444@s.whatsapp.net", "2026-09-18")
+	if err := p.Save(h.policy); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = h.run(t, "send", "444@s.whatsapp.net", "hola", "--yes")
+	if code != exitError || !strings.Contains(errOut, "never sends the first message") {
+		t.Fatalf("first contact: exit %d\n%s%s", code, out, errOut)
+	}
+	if len(h.execCalls) != 0 {
+		t.Fatalf("nothing may run: %v", h.execCalls)
+	}
+}
+
+func TestSendReportsABanAndStops(t *testing.T) {
+	h := newHarness(t)
+	h.execCode = 1
+	h.execErr = "wacli: temporary ban (code 101), expires in 12h0m0s"
+	code, _, errOut := h.run(t, "send", "111@g.us", "hola", "--yes")
+	if code != exitError || !strings.Contains(errOut, "temporary ban") {
+		t.Fatalf("ban: exit %d\n%s", code, errOut)
+	}
+	h.execCode, h.execErr = 0, ""
+	calls := len(h.execCalls)
+	if code, _, errOut = h.run(t, "send", "111@g.us", "hola", "--yes"); code != exitError || !strings.Contains(errOut, "temporary ban") {
+		t.Fatalf("the ban must hold: exit %d\n%s", code, errOut)
+	}
+	if len(h.execCalls) != calls {
+		t.Fatal("a banned sender must not run wacli again")
 	}
 }
 
