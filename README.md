@@ -69,7 +69,8 @@ Ask Claude: "save the photos from the book club group, and tell me when new ones
 Reading needs nothing but your Mac. Sending needs a linked device, and that is a different decision.
 
 - **It breaks WhatsApp's terms.** A ban hits your phone number, not the app. Reports exist of bans on low-volume, reply-only accounts, so the risk is small but real.
-- Link once with the `wacli` binary in `~/.local/share/wa/bin/`: `wacli auth --phone <your number, digits only>`, then WhatsApp on your phone → Linked devices → Link with phone number.
+- Ask Claude to set it up, or run `wa link` yourself. It installs `wacli` (MIT, from its own release, checksum-checked) and shows a QR code.
+- Scan the QR: WhatsApp on your phone → Settings → Linked devices → Link a device. `wa link --status` confirms it, and `wa unlink` undoes it.
 - Then: `wa send <chat> "text"` or `wa send <chat> --file photo.jpg --caption "look"`.
 
 `wa` refuses what gets numbers banned:
@@ -97,6 +98,17 @@ Nothing is sent without `--yes`. Without it, `wa send` prints the message and st
 - `wa` cannot get files that only the phone still has.
 - A WhatsApp Desktop update can change the data. `wa doctor` then names the missing columns.
 - `wa watch` does not report edited or deleted messages.
+
+## Update.
+
+`wa doctor` tells you when a newer version is out. It checks once a day, and says nothing when you are offline.
+
+```
+/plugin marketplace update wa
+/plugin update wa
+```
+
+Then restart Claude Code. Claude can run both from the terminal as `claude plugin …` if you would rather ask.
 
 ## Uninstall.
 

@@ -30,7 +30,7 @@ GOTOOLCHAIN=auto go test ./...
 mkdir -p dist
 for arch in arm64 amd64; do
 	CGO_ENABLED=0 GOOS=darwin GOARCH=$arch GOTOOLCHAIN=auto \
-		go build -trimpath -ldflags '-s -w' -o "dist/wa-darwin-$arch" ./cmd/wa
+		go build -trimpath -ldflags "-s -w -X main.version=$version" -o "dist/wa-darwin-$arch" ./cmd/wa
 done
 (cd dist && shasum -a 256 wa-darwin-arm64 wa-darwin-amd64 >SHA256SUMS)
 cat dist/SHA256SUMS

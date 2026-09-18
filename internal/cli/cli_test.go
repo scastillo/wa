@@ -1,14 +1,21 @@
 package cli
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/scastillo/wa/internal/fixture"
+	"github.com/scastillo/wa/internal/link"
 	"github.com/scastillo/wa/internal/policy"
 	"github.com/scastillo/wa/internal/store"
 )
@@ -16,19 +23,23 @@ import (
 var now = time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 
 type harness struct {
-	fx        *fixture.Set
-	policy    string
-	tty       bool
-	stdin     string
-	downloads string
-	appDown   bool
-	allowCmd  string // what doctor and the hints tell the user to run
-	wacli     string // where wa looks for wacli
-	sendState string
-	execCalls [][]string // what wa ran through Exec, for wacli
-	execOut   string
-	execErr   string
-	execCode  int
+	fx          *fixture.Set
+	policy      string
+	tty         bool
+	stdin       string
+	downloads   string
+	appDown     bool
+	allowCmd    string // what doctor and the hints tell the user to run
+	wacli       string // where wa looks for wacli
+	sendState   string
+	execCalls   [][]string // what wa ran through Exec, for wacli
+	execOut     string
+	execErr     string
+	execCode    int
+	fetch       func(string) ([]byte, error)
+	execStream  func(bin string, args, extraEnv []string) int
+	updateCache string
+	version     string
 
 	clock   time.Time       // advanced only by Sleep
 	sleeps  int             // how many times a command slept
@@ -81,12 +92,16 @@ func (h *harness) run(t *testing.T, args ...string) (code int, stdout, stderr st
 				h.onSleep(h.sleeps)
 			}
 		},
-		WacliPath:  h.wacli,
-		WacliStore: h.wacli + "-store",
-		SendState:  h.sendState,
-		AllowCmd:   h.allowCmd,
-		Downloads:  h.downloads,
-		Jitter:     func(min, max time.Duration) time.Duration { return min },
+		WacliPath:   h.wacli,
+		WacliStore:  h.wacli + "-store",
+		SendState:   h.sendState,
+		AllowCmd:    h.allowCmd,
+		Downloads:   h.downloads,
+		Jitter:      func(min, max time.Duration) time.Duration { return min },
+		Version:     h.version,
+		UpdateCache: h.updateCache,
+		Fetch:       h.fetch,
+		ExecStream:  h.execStream,
 		Exec: func(bin string, args, extraEnv []string) (string, string, int) {
 			h.execCalls = append(h.execCalls, append([]string{bin}, args...))
 			return h.execOut, h.execErr, h.execCode
@@ -457,4 +472,115 @@ func TestParseWhen(t *testing.T) {
 			t.Errorf("%q: want an error", bad)
 		}
 	}
+}
+
+// linkHarness gives the harness a fake wacli download and a fake pairing run.
+type linkFakes struct {
+	fetched  []string
+	streamed [][]string
+	tarball  []byte
+	sums     string
+	authOut  string
+}
+
+func TestLinkInstallsWacliThenPairs(t *testing.T) {
+	h := newHarness(t)
+	f := &linkFakes{tarball: fakeWacliTar(t), authOut: "Authenticated as 1@s.whatsapp.net"}
+	f.sums = sha256Hex(f.tarball) + "  " + link.Asset(link.Version, runtime.GOARCH) + "\n"
+	h.fetch = func(url string) ([]byte, error) {
+		f.fetched = append(f.fetched, url)
+		if strings.HasSuffix(url, "checksums.txt") {
+			return []byte(f.sums), nil
+		}
+		return f.tarball, nil
+	}
+	h.execStream = func(bin string, args, extraEnv []string) int {
+		f.streamed = append(f.streamed, append([]string{bin}, args...))
+		return 0
+	}
+	h.execOut = f.authOut
+	h.wacli = filepath.Join(t.TempDir(), "bin", "wacli")
+
+	code, out, errOut := h.run(t, "link")
+	if code != exitOK || !strings.Contains(out, "installed wacli") || !strings.Contains(out, "sending is ready") {
+		t.Fatalf("link: exit %d\n%s%s", code, out, errOut)
+	}
+	if len(f.streamed) != 1 || !strings.Contains(strings.Join(f.streamed[0], " "), "auth --qr-format terminal") {
+		t.Fatalf("pairing must stream the QR: %v", f.streamed)
+	}
+	if !strings.Contains(out, "Linked devices") {
+		t.Fatalf("the user needs the steps on their phone:\n%s", out)
+	}
+	if _, err := os.Stat(h.wacli); err != nil {
+		t.Fatalf("wacli must be installed: %v", err)
+	}
+
+	// A second link does not download again.
+	before := len(f.fetched)
+	if code, _, _ = h.run(t, "link", "--status"); code != exitOK {
+		t.Fatalf("status: exit %d", code)
+	}
+	if len(f.fetched) != before {
+		t.Fatalf("an installed wacli must not download again: %v", f.fetched)
+	}
+}
+
+func TestLinkStatusSaysWhenNoPhoneIsPaired(t *testing.T) {
+	h := newHarness(t)
+	h.wacli = filepath.Join(t.TempDir(), "wacli")
+	if err := os.WriteFile(h.wacli, []byte("x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	h.execOut, h.execCode = "not authenticated", 1
+	h.fetch = func(string) ([]byte, error) { return nil, errors.New("must not download") }
+	code, out, _ := h.run(t, "link", "--status")
+	if code != exitError || !strings.Contains(out, "not paired") {
+		t.Fatalf("status: exit %d\n%s", code, out)
+	}
+}
+
+func TestDoctorReportsSendingAndUpdates(t *testing.T) {
+	h := newHarness(t)
+	h.updateCache = filepath.Join(t.TempDir(), "update.json")
+	h.version = "0.1.0"
+	h.fetch = func(string) ([]byte, error) { return []byte(`{"tag_name":"v9.9.9"}`), nil }
+	_, out, _ := h.run(t, "doctor")
+	if !strings.Contains(out, "ok   sending   not set up") {
+		t.Fatalf("doctor must say sending is not set up:\n%s", out)
+	}
+	if !strings.Contains(out, "wa 9.9.9 is out") || !strings.Contains(out, "claude plugin update wa") {
+		t.Fatalf("doctor must offer the update:\n%s", out)
+	}
+
+	// On the newest version it says nothing about updates.
+	h.version = "9.9.9"
+	if _, out, _ = h.run(t, "doctor"); strings.Contains(out, "is out") {
+		t.Fatalf("no update line on the newest version:\n%s", out)
+	}
+}
+
+func fakeWacliTar(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	body := []byte("#!/bin/sh\necho wacli\n")
+	if err := tw.WriteHeader(&tar.Header{Name: "wacli", Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }

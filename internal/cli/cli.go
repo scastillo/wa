@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/scastillo/wa/internal/policy"
+	"github.com/scastillo/wa/internal/release"
 	"github.com/scastillo/wa/internal/render"
 	"github.com/scastillo/wa/internal/store"
 )
@@ -63,6 +64,8 @@ commands:
   media    <chat> [--since D] [--until D|--before D] [--limit N] [--type image,video,audio,document,sticker]
            [--from S] [--dest DIR] [--dry-run] [--remote none|live|all] [--json]
            saves attachments; a chat not on the allowlist gets counts and name-free file names only
+  link     [--status] [--phone N]  install wacli and pair a phone, so wa can send
+  unlink                   log the linked device out
   send     <chat> <text>|--file F [--caption C] [--dry-run] [--yes]
            writes through the linked device; shows the message unless --yes is given
   watch    --state F [--seed] [--chat C]... [--wait S] [--poll S] [--full] [--json]
@@ -91,8 +94,14 @@ type Env struct {
 	Downloads    string // default destination of wa media
 	Sleep        func(time.Duration)
 	Jitter       func(min, max time.Duration) time.Duration
+	Version      string // the wa version, for the update check
+	UpdateCache  string // where the daily update check keeps its answer
 	// Exec runs another program, for wacli. It returns its output and exit code.
 	Exec func(bin string, args, extraEnv []string) (stdout, stderr string, code int)
+	// ExecStream runs a program with wa's own output, so a QR code appears as it comes.
+	ExecStream func(bin string, args, extraEnv []string) int
+	// Fetch reads a URL, for installing wacli and for the update check.
+	Fetch func(url string) ([]byte, error)
 }
 
 // Run executes one wa command and returns its exit code.
@@ -118,6 +127,10 @@ func Run(args []string, env Env) int {
 		return mediaCmd(args[1:], env)
 	case "send":
 		return sendCmd(args[1:], env)
+	case "link":
+		return linkCmd(args[1:], env)
+	case "unlink":
+		return unlinkCmd(args[1:], env)
 	case "watch":
 		return watchCmd(args[1:], env)
 	case "help", "-h", "--help":
@@ -617,9 +630,22 @@ func doctor(env Env) int {
 		report("ok", "allowlist", "%s allowed (%s)", plural(len(p.Allow), "chat"), env.PolicyPath)
 	}
 
-	// Reading needs no wacli, so a missing one is not worth a line.
-	if _, err := os.Stat(env.WacliPath); err == nil {
-		report("ok", "wacli", "installed at %s (phone link not checked yet)", env.WacliPath)
+	// Reading needs no linked device. Sending does, so say how it stands.
+	if _, err := os.Stat(env.WacliPath); err != nil {
+		report("ok", "sending", "not set up (reading needs nothing); run wa link to send messages")
+	} else if env.Exec == nil {
+		report("ok", "sending", "wacli is installed at %s", env.WacliPath)
+	} else if out, errOut, code := env.Exec(env.WacliPath, []string{"auth", "status", "--lock-wait", "5s"}, env.wacliEnv()); code == 0 &&
+		strings.Contains(strings.ToLower(out+errOut), "authenticated") {
+		report("ok", "sending", "a phone is paired, so wa send works")
+	} else {
+		report("warn", "sending", "wacli is installed but no phone is paired; run wa link")
+	}
+
+	if env.Fetch != nil && env.UpdateCache != "" {
+		if latest := release.Latest(env.UpdateCache, env.Now(), env.Fetch); release.Newer(env.Version, latest) {
+			report("warn", "update", "wa %s is out (this is %s); run  claude plugin marketplace update wa  then  claude plugin update wa", latest, env.Version)
+		}
 	}
 
 	if failed {

@@ -15,6 +15,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - A temporary ban stops every later send until it expires. A logout stops sending until the user pairs again.
 - `wa send` shows the message and sends nothing without `--yes`. `--dry-run` shows it and exits 0.
 - Long text is split at 4,000 characters.
+- `wa link` installs wacli 0.18.2 from its own release, checks it against that release's checksums, and shows the QR code to scan. `wa link --status` and `wa unlink` follow it. The scan is the only step a person must do.
+- `wa doctor` reports whether sending is set up, and once a day whether a newer wa is out, with the two commands that update it.
 
 ### Note
 
