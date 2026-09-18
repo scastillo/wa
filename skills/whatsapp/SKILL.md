@@ -42,6 +42,8 @@ Run `wa doctor`. Each line starts with `ok`, `warn` or `FAIL`.
 | `warn allowlist … no chat allowed` | No chat is readable | Ask the user which chat to allow, then run `wa allow --match "<name>"`. |
 | `warn allowlist … every chat is readable` | Allow-all is on | Say so once. Every chat can now enter this session. |
 | `wa: cannot download …` | The release download failed | Report the message. Ask the user to check their network, then retry once. |
+| `ok sending … not set up` | No linked device yet | Only matters for sending. Section 7 sets it up. |
+| `warn update … wa X is out` | A newer version exists | Run `claude plugin marketplace update wa`, then `claude plugin update wa`. Then tell the user to restart Claude Code. |
 | `wa: … does not match the release checksum` | The download is not the released binary | Stop. Report it. Do not retry in a loop. |
 
 ## 2. Find the chat.
@@ -118,6 +120,15 @@ This is the most common job: hold one group's photos, videos and documents on di
 ## 7. Send a message.
 
 Reading is read-only. Sending goes through a linked device and breaks WhatsApp's terms, so it works differently.
+
+**Set it up (once).** `wa doctor` says `ok sending not set up` until then.
+
+1. Run `wa link`. It installs wacli, checks its checksum, and prints a QR code.
+2. Show the user the QR code and these steps: WhatsApp on their phone, then Settings, then Linked devices, then Link a device, then scan.
+3. Check with `wa link --status`. It says `sending is ready` when the phone is paired.
+4. `wa unlink` logs the device out again.
+
+The scan is the one step the user must do themselves.
 
 1. Write the text and show it to the user: `wa send <JID> "<text>"`. Without `--yes` this only prints the message.
 2. Send it after they agree: `wa send <JID> "<text>" --yes`.

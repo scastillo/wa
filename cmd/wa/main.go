@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,16 +52,54 @@ func main() {
 			_, err := os.Stat("/Applications/WhatsApp.app")
 			return err == nil
 		},
-		AppRunning: func() bool { return exec.Command("pgrep", "-x", "WhatsApp").Run() == nil },
-		WacliPath:  filepath.Join(home, ".local", "share", "wa", "bin", "wacli"),
-		WacliStore: filepath.Join(home, ".local", "share", "wa", "wacli"),
-		SendState:  filepath.Join(home, ".local", "share", "wa", "send-state.json"),
-		AllowCmd:   allowCmd(home),
-		Jitter:     jitter,
-		Exec:       run,
-		Downloads:  filepath.Join(home, "Downloads", "whatsapp"),
-		Sleep:      time.Sleep,
+		AppRunning:  func() bool { return exec.Command("pgrep", "-x", "WhatsApp").Run() == nil },
+		WacliPath:   filepath.Join(home, ".local", "share", "wa", "bin", "wacli"),
+		WacliStore:  filepath.Join(home, ".local", "share", "wa", "wacli"),
+		SendState:   filepath.Join(home, ".local", "share", "wa", "send-state.json"),
+		AllowCmd:    allowCmd(home),
+		Jitter:      jitter,
+		Version:     version,
+		UpdateCache: filepath.Join(home, ".local", "share", "wa", "update.json"),
+		Exec:        run,
+		ExecStream:  runStream,
+		Fetch:       fetch,
+		Downloads:   filepath.Join(home, "Downloads", "whatsapp"),
+		Sleep:       time.Sleep,
 	}))
+}
+
+// version is set at build time. It only feeds the update check.
+var version = "dev"
+
+// runStream runs a program on wa's own terminal, so a QR code appears while the
+// program waits for the scan.
+func runStream(bin string, args, extraEnv []string) int {
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(os.Environ(), extraEnv...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode()
+		}
+		fmt.Fprintln(os.Stderr, "wa:", err)
+		return 1
+	}
+	return 0
+}
+
+// fetch reads a URL for the wacli install and the update check.
+func fetch(url string) ([]byte, error) {
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s said %s", url, resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 200<<20))
 }
 
 // run executes another program and collects its output. wa uses it for wacli.
